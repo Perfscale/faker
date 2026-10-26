@@ -1,0 +1,12 @@
+# Minimal perfscale config for the example. The library is declared here;
+# `use:` paths resolve relative to the declaring file.
+vus: 1
+duration: 2s
+seed: 42 # reproducible library output — token() draws from a seeded PRNG
+
+libraries:
+  - use: ../target/wasm32-wasip2/release/hello.wasm
+    # `as:` would rename the token alias; default is the crate name: hello
+    with: # optional — arrives in the library's init(config) as JSON
+      greeting: hello
+    # capabilities: [clock]   # grant wasi:clocks; needs allow_library_capabilities: true
