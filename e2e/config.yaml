@@ -1,0 +1,5 @@
+# E2E config for the faker WASM library — one VU, one second, fixed seed
+# so the run is reproducible (all generators draw from a seeded PRNG).
+vus: 1
+duration: 1s
+seed: 42

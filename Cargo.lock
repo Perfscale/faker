@@ -21,6 +21,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "faker"
+version = "0.1.0"
+dependencies = [
+ "perfscale-library-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -40,14 +48,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "hello"
-version = "0.1.0"
-dependencies = [
- "perfscale-library-sdk",
- "serde_json",
-]
 
 [[package]]
 name = "id-arena"
@@ -104,8 +104,8 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "perfscale-library-sdk"
-version = "0.21.0"
-source = "git+https://github.com/Perfscale/perfscale.git?tag=v0.21.0#21308bb6cab38229be38626e4ead79b36afad027"
+version = "0.28.0"
+source = "git+https://github.com/Perfscale/perfscale.git?tag=v0.28.0#637217cc4a3f33b680e7178683fbf872e1b61e24"
 dependencies = [
  "serde_json",
  "wit-bindgen",
@@ -351,7 +351,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[patch.unused]]
-name = "perfscale-core"
-version = "0.21.0"

@@ -1,97 +1,152 @@
-# perfscale library template
+# Perfscale Faker
 
-The minimal starting point for authoring a **perfscale library** — a WASM
-component that provides value-generating functions to `${alias.fn(...)}`
-tokens in perfscale test payloads (RFC 005). Requires perfscale ≥ v0.21.0.
+Deterministic Faker-style test data as a pure Rust/WASM
+[Perfscale library](https://github.com/Perfscale/perfscale/tree/v0.28.0/docs/library-sdk.md).
+It adds `internet`, `address`, and `payment` functions to `${faker...}` tokens
+without changing the engine or granting filesystem, clock, random, or network
+capabilities.
 
-**Use this template:** click *Use this template → Create a new repository*
-on GitHub (or `gh repo create my-lib --template Perfscale/library-template`),
-then clone your new repo.
+Version 0.1.0 deliberately provides a small embedded English corpus, not the
+full Python Faker API. Tested with Perfscale v0.28.0.
 
-## What you get
+## Install
 
-`src/lib.rs` implements two functions demonstrating the two core concepts:
-
-- `greet(name)` → `"hello, {name}!"` — a plain function
-- `token([key])` → a random 16-char id from the SDK's seeded PRNG; the
-  optional key memoizes per message (`${hello.token(order)}` twice in one
-  message = one value; no key = always fresh)
-
-plus runtime-free unit tests (`cargo test`) driven by the SDK's `test_call`
-harness — no wasm runtime needed.
-
-## Make it yours
-
-1. **Rename the package** in `Cargo.toml` (`[package] name`). The crate name
-   becomes the default token alias (`-` → `_`) and must match
-   `[a-z][a-z0-9_]*`. Or keep the crate name and set `as: myalias` in YAML.
-2. **Add a function:**
-   - add a `FunctionInfo` entry in `functions()` (set `secret: true` for
-     credential-minting functions — the engine masks their results in logs)
-   - add a match arm in `call()`; use `args::string`/`int`/`float` to parse
-     arguments, `ctx.prng()` for all randomness, `ctx.memo(&key, f)` for
-     per-message reuse
-3. **Configure it (optional):** override `init()` — the YAML `with:` block
-   arrives there as JSON. Returning `Err` is fatal to the run.
-
-## Build
-
-```console
-$ rustup target add wasm32-wasip2
-$ cargo build --release --target wasm32-wasip2
-```
-
-(Rust ≥ 1.82 emits WASI Preview 2 components natively — no cargo-component.)
-
-## Wire it into a perfscale test
+Download the component and checksum from
+[GitHub Releases](https://github.com/Perfscale/faker/releases), or build it
+locally as shown below. Declare it in the test or config YAML; relative paths
+resolve against the declaring file:
 
 ```yaml
-# config.yaml
-vus: 1
-duration: 10s
 libraries:
-  - use: ./target/wasm32-wasip2/release/hello.wasm  # path relative to this file
-    with:                                           # optional, passed to init()
-      greeting: hi
+  - use: ./faker.wasm
+    as: faker                    # optional: faker is the manifest default
+    capabilities: []             # required; this component needs no grants
+    with:
+      language: en               # optional, default: en
+      encoding: plain            # optional: plain (default) or url
 ```
 
+Use the functions inside any payload that supports `${alias.fn(...)}` tokens:
+
 ```yaml
-# test.yaml — ${...} tokens expand in action payloads (http/ws/gRPC/GraphQL)
 steps:
   - use: std/http@v1
     with:
       method: POST
-      url: https://httpbin.org/post
+      url: https://api.example.test/users
       body:
-        greeting: "${hello.greet(world)}"
-        order_id: "${hello.token(order)}"
+        email: "${faker.internet("email")}"
+        city: "${faker.address("city")}"
 ```
 
-(`std/log@v1` resolves `${{ }}` step outputs, not `${...}` generator tokens.)
+A known function with an unknown kind, invalid arguments, or invalid `with:`
+options fails the step instead of sending bad data. Calls return fresh values;
+there is no optional memo-key argument in v0.1.0.
+
+## Functions
+
+| Call | Result |
+|---|---|
+| `internet("email")` | ASCII `first.lastN@example.com/net/org` address |
+| `address("street_address")` | Street number and name |
+| `address("zip_code")` | Five-digit postal code |
+| `address("city")` | City |
+| `address("state_abbr")` | Two-letter US state abbreviation |
+| `address("country")` | Country |
+| `payment("credit_card_number")` | Visa test number `4111111111111111` |
+| `payment("credit_card_expiration_month")` | Month `1` through `12` |
+| `payment("credit_card_expiration_year")` | Uniform year from current UTC year +1 through +71, inclusive |
+| `payment("credit_card_cvv")` | Number `100` through `999` |
+
+The email domains are reserved for examples. The component does not send
+email, process payments, or fetch real personal data.
+
+## Options
+
+Both `with:` keys are optional. Unknown keys and values are errors.
+
+| Option | Values | Default |
+|---|---|---|
+| `language` | `en` (the only corpus currently available) | `en` |
+| `encoding` | `plain`, `url` | `plain` |
+
+`encoding: url` percent-encodes the UTF-8 bytes of every returned value:
+`@` becomes `%40`, spaces become `%20`, and URL-reserved punctuation is
+escaped. This is useful when inserting generated values into an
+`application/x-www-form-urlencoded` body or a URL query. Do not use this mode
+for ordinary JSON values.
+
+```yaml
+libraries:
+  - use: /loadgen/faker.wasm
+    as: faker
+    capabilities: []
+    with: { language: en, encoding: url }
+
+steps:
+  - name: checkout
+    use: std/http@v1
+    with:
+      method: POST
+      url: "${{ env.BASE_URL }}/cart/checkout"
+      headers: { Content-Type: application/x-www-form-urlencoded }
+      body: 'email=${faker.internet("email")}&street_address=${faker.address("street_address")}&zip_code=${faker.address("zip_code")}&city=${faker.address("city")}&state=${faker.address("state_abbr")}&country=${faker.address("country")}&credit_card_number=${faker.payment("credit_card_number")}&credit_card_expiration_month=${faker.payment("credit_card_expiration_month")}&credit_card_expiration_year=${faker.payment("credit_card_expiration_year")}&credit_card_cvv=${faker.payment("credit_card_cvv")}'
+    check: { status: 200 }
+```
+
+The [Online Boutique migration PR](https://github.com/GoogleCloudPlatform/microservices-demo/pull/3588)
+uses the same component in its Docker-based load generator.
+
+## Determinism and time
+
+All random choices come from the Perfscale SDK's seeded PRNG. A config such as
+`seed: 42` replays the same sequence for the same VUs, calls, and inputs.
+Expiration years also depend on `ctx.time_ms`, so their range advances with
+the UTC year. No WASI clock or random import is used.
+
+## Docker distribution
+
+Each release publishes `faker.wasm`, `faker.wasm.sha256`, and an artifact-only
+OCI image. The image contains no executable runtime; it exists for `COPY
+--from` in another Dockerfile:
+
+```dockerfile
+FROM ghcr.io/perfscale/faker:0.1.0 AS faker
+FROM ghcr.io/perfscale/perfscale:0.28.0
+WORKDIR /loadgen
+COPY --from=faker /faker.wasm ./
+COPY test.yaml config.yaml ./
+```
+
+Pin the GHCR multi-arch digest in production builds. No Rust toolchain or
+source checkout is needed in the consuming image.
+
+## Build and test
+
+Rust 1.82 or newer emits WASI Preview 2 components directly:
 
 ```console
-$ cd examples && perfscale lint test.yaml config.yaml
-$ perfscale run -f test.yaml -c config.yaml
+rustup target add wasm32-wasip2
+cargo test
+cargo build --release --target wasm32-wasip2
+# target/wasm32-wasip2/release/faker.wasm
 ```
 
-See [`examples/`](examples/) for a runnable version (log + http steps).
+Run the real engine integration test without any external HTTP service:
 
-## The rules that matter
+```console
+(cd e2e && perfscale lint faker.test.yaml config.yaml)
+perfscale run -f e2e/faker.test.yaml -c e2e/config.yaml
+```
 
-- **Errors:** a known alias + unknown function (or bad arguments) **fails the
-  step** — typos never slip silently into a payload. An unknown *alias* leaves
-  the token verbatim.
-- **Randomness:** draw everything from `ctx.prng()` (seeded per instance);
-  `wasi:random` is never provided. Avoid `HashMap` (use `Vec`/`BTreeMap`) and
-  `println!` (`wasi:cli/*` is never granted).
-- **Capabilities:** `fs`/`clock` access must be granted in YAML
-  (`capabilities: [clock]` under the `libraries:` entry, plus
-  `allow_library_capabilities: true` in the config). Importing more than
-  granted is a hard load error.
-- **Determinism:** `seed:` in the config makes runs reproducible.
+On macOS, select the Command Line Tools SDK if the wasm build requires it:
 
-Full contract: [perfscale-library-sdk docs](https://github.com/Perfscale/perfscale/tree/v0.21.0/crates/perfscale-library-sdk).
+```console
+export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+```
+
+Documentation: [Perfscale/docs](https://github.com/Perfscale/docs/blob/main/en/concepts/faker.mdx).
 
 ## License
 
-MIT OR Apache-2.0, same as perfscale.
+MIT OR Apache-2.0, same as Perfscale.
