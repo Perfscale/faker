@@ -1,16 +1,17 @@
 [package]
-name = "hello"
+name = "faker"
 version = "0.1.0"
 edition = "2021"
-description = "Template perfscale WASM library: greet + memoized token (RFC 005)"
+description = "Deterministic Faker-style test data for Perfscale"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Perfscale/faker"
 publish = false
 
-# The crate name becomes the default token alias ('-' → '_'), and must match
-# [a-z][a-z0-9_]* — rename the package when you use this template.
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-perfscale-library-sdk = { git = "https://github.com/Perfscale/perfscale.git", tag = "v0.21.0" }
+perfscale-library-sdk = { git = "https://github.com/Perfscale/perfscale.git", tag = "v0.28.0" }
 serde_json = "1"
+
+[workspace]

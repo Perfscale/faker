@@ -1,0 +1,99 @@
+# End-to-end smoke test for the `faker` WASM component: expands `${faker.*}`
+# / `${plain.*}` tokens through the engine against the locally built
+# component and lets CI assert on the expanded values. No external HTTP
+# service is involved — validation happens in SQL against an in-memory
+# sqlite database.
+#
+# The SAME component is loaded twice under different aliases to exercise both
+# encoding modes:
+#   faker — with.encoding: url  (email '@' → %40, spaces → %20)
+#   plain — with.encoding: plain (default; values left as-is)
+#
+# Run from the repo root, after `cargo build --release --target wasm32-wasip2`:
+#   perfscale run -c e2e/config.yaml -f e2e/faker.test.yaml
+# (`perfscale lint` resolves `use:` paths relative to the cwd, so lint from
+# e2e/: `cd e2e && ../perfscale lint faker.test.yaml config.yaml`.)
+libraries:
+  - use: ../target/wasm32-wasip2/release/faker.wasm
+    as: faker # url-encoded mode
+    with:
+      language: en
+      encoding: url
+    capabilities: []
+  - use: ../target/wasm32-wasip2/release/faker.wasm
+    as: plain # plain mode (default encoding)
+    with:
+      encoding: plain
+    capabilities: []
+
+steps:
+  - name: open db
+    use: std/db-connect@v1
+    with:
+      driver: sqlite
+      dsn: "sqlite::memory:"
+    outputs: db
+
+  # Generate values in both encodings and validate their format in SQL with
+  # instr()/CAST so CI can grep for "result":"E2E_OK" without depending on
+  # exact generated fixtures. The year range uses strftime('%Y','now')
+  # instead of a hardcoded year so the check is not flaky around New Year
+  # (exact boundary behavior is covered by unit tests).
+  - name: expand tokens
+    use: std/db-query@v1
+    with:
+      id: "${{ db.id }}"
+      query: >
+        SELECT CASE WHEN
+          instr(?, '%40') > 0 AND instr(?, '@') = 0
+          AND instr(?, '@') > 0
+          AND instr(?, ' ') > 0
+          AND instr(?, '%20') > 0 AND instr(?, ' ') = 0
+          AND ? = '4111111111111111'
+          AND CAST(? AS INTEGER) BETWEEN 1 AND 12
+          AND CAST(? AS INTEGER) BETWEEN CAST(strftime('%Y','now') AS INTEGER) AND CAST(strftime('%Y','now') AS INTEGER) + 70
+          AND CAST(? AS INTEGER) BETWEEN 100 AND 999
+          AND CAST(? AS INTEGER) BETWEEN 10000 AND 99999
+          THEN 'E2E_OK' ELSE 'E2E_FAIL' END AS result,
+          ? AS email_url, ? AS email_plain,
+          ? AS street_url, ? AS street_plain,
+          ? AS cc, ? AS cc_month, ? AS cc_year, ? AS cc_cvv, ? AS zip
+      params:
+        # check inputs (in ? order):
+        - "${faker.internet(email)}" # url: '@' percent-encoded as %40
+        - "${faker.internet(email)}"
+        - "${plain.internet(email)}" # plain: literal '@'
+        - "${plain.address(street_address)}" # plain: contains spaces
+        - "${faker.address(street_address)}" # url: spaces as %20
+        - "${faker.address(street_address)}"
+        - "${faker.payment(credit_card_number)}" # deterministic Visa
+        - "${faker.payment(credit_card_expiration_month)}"
+        - "${faker.payment(credit_card_expiration_year)}"
+        - "${faker.payment(credit_card_cvv)}"
+        - "${faker.address(zip_code)}"
+        # raw values echoed back for debugging / CI greps:
+        - "${faker.internet(email)}"
+        - "${plain.internet(email)}"
+        - "${faker.address(street_address)}"
+        - "${plain.address(street_address)}"
+        - "${faker.payment(credit_card_number)}"
+        - "${faker.payment(credit_card_expiration_month)}"
+        - "${faker.payment(credit_card_expiration_year)}"
+        - "${faker.payment(credit_card_cvv)}"
+        - "${faker.address(zip_code)}"
+    outputs: rows
+
+  # std/log resolves ${{ }} step outputs, NOT ${...} generator tokens — the
+  # expanded values reach the log via the rows.data output above.
+  - name: show
+    use: std/log@v1
+    with:
+      message: "E2E-RESULT ${{ rows.data }}"
+
+  - name: hang up
+    use: std/db-close@v1
+    with: { id: "${{ db.id }}" }
+
+  - name: finish once
+    use: std/sleep@v1
+    with: { seconds: 2 }

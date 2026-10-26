@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 on:
   push:
@@ -7,9 +7,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned perfscale release used for the integration e2e below.
+  PERFSCALE_VERSION: v0.28.0
+  # SHA256 of perfscale-linux-amd64 from the v0.28.0 release (hardcoded so a
+  # tampered/replaced release asset fails the job instead of running).
+  PERFSCALE_SHA256: 4e8f5dba869845642a7e9dce559182b3099cc9b296781c2871a7ea2a3daa75b7
 
 jobs:
-  lint-test-build:
+  lint-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,29 +23,12 @@ jobs:
           targets: wasm32-wasip2
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --target wasm32-wasip2 -- -D warnings
+      - run: cargo test
 
-      - name: fmt
-        run: cargo fmt --all -- --check
-
-      - name: clippy (host)
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: clippy (wasm target)
-        run: cargo clippy --target wasm32-wasip2 -- -D warnings
-
-      - name: unit tests (host, no wasm runtime needed)
-        run: cargo test
-
-      - name: build component
-        run: cargo build --release --target wasm32-wasip2
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hello-wasm
-          path: target/wasm32-wasip2/release/hello.wasm
-
-  integration:
-    needs: lint-test-build
+  component:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,23 +36,46 @@ jobs:
         with:
           targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target wasm32-wasip2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faker-wasm
+          path: target/wasm32-wasip2/release/faker.wasm
 
-      - name: build component
-        run: cargo build --release --target wasm32-wasip2
+  integration:
+    runs-on: ubuntu-latest
+    needs: component
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target wasm32-wasip2
 
-      - name: download perfscale v0.21.0
+      - name: download perfscale ${{ env.PERFSCALE_VERSION }} (Linux amd64)
         run: |
           curl -sSfL -o perfscale \
-            https://github.com/Perfscale/perfscale/releases/download/v0.21.0/perfscale-linux-amd64
+            "https://github.com/Perfscale/perfscale/releases/download/${PERFSCALE_VERSION}/perfscale-linux-amd64"
+          echo "${PERFSCALE_SHA256}  perfscale" | sha256sum -c -
           chmod +x perfscale
           ./perfscale --version
 
-      - name: lint the example
-        # lint resolves library `use:` paths relative to the cwd, so run it
-        # from examples/ (run resolves them relative to the declaring file).
-        working-directory: examples
-        run: ../perfscale lint test.yaml config.yaml
+      # lint resolves library `use:` paths relative to the cwd, so run it
+      # from e2e/ (run resolves them relative to the declaring file).
+      - name: lint the e2e files
+        working-directory: e2e
+        run: ../perfscale lint faker.test.yaml config.yaml
 
-      - name: run the example
-        working-directory: examples
-        run: ../perfscale run -f test.yaml -c config.yaml
+      - name: run the e2e test against the built component
+        run: |
+          ./perfscale run -c e2e/config.yaml -f e2e/faker.test.yaml | tee e2e.log
+
+      - name: assert expanded values
+        run: |
+          grep -q 'E2E-RESULT' e2e.log
+          grep -q '"result":"E2E_OK"' e2e.log
+          grep -q '"cc":"4111111111111111"' e2e.log
+          grep -Eq '"email_url":"[^"]*%40example\.' e2e.log
+          grep -Eq '"email_plain":"[^"]*@example\.' e2e.log
+          grep -Eq '"street_url":"[^"]*%20' e2e.log
